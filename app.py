@@ -115,115 +115,182 @@ def main():
     st.sidebar.markdown("---")
     st.sidebar.markdown("[GitHubリポジトリ](https://github.com/fumifumi0831/whisper-transcription)")
     
-    # ファイルアップロード
-    uploaded_file = st.file_uploader("音声ファイルをアップロード", 
-                                    type=["mp3", "wav", "m4a", "ogg", "flac"],
-                                    help="対応フォーマット: MP3, WAV, M4A, OGG, FLAC")
+    # ファイルアップロード（複数ファイル対応）
+    uploaded_files = st.file_uploader("音声ファイルをアップロード（複数選択可）", 
+                                     type=["mp3", "wav", "m4a", "ogg", "flac"],
+                                     accept_multiple_files=True,
+                                     help="対応フォーマット: MP3, WAV, M4A, OGG, FLAC")
     
-    if uploaded_file is not None:
-        # ファイル情報表示
-        file_size_mb = uploaded_file.size / (1024 * 1024)
-        st.info(f"ファイル: {uploaded_file.name} ({file_size_mb:.2f} MB)")
-        
-        # 音声再生機能
-        st.audio(uploaded_file, format=f"audio/{uploaded_file.name.split('.')[-1]}")
+    if uploaded_files:
+        # ファイル数と合計サイズの表示
+        total_size = sum(file.size for file in uploaded_files) / (1024 * 1024)
+        st.info(f"選択されたファイル数: {len(uploaded_files)} (合計サイズ: {total_size:.2f} MB)")
         
         # 文字起こし実行ボタン
         transcribe_button = st.button("文字起こし開始", type="primary")
         
         if transcribe_button:
-            # 処理開始
-            with st.spinner("文字起こし処理中..."):
+            # モデルロード（一度だけ）
+            with st.spinner("モデルをロード中..."):
+                model_load_start = time.time()
+                model = load_whisper_model(model_option)
+                model_load_time = time.time() - model_load_start
+                st.success(f"モデルロード完了（{model_load_time:.2f}秒）")
+            
+            # 進捗バー
+            progress_bar = st.progress(0)
+            status_text = st.empty()
+            
+            # 結果を保存するリスト
+            all_results = []
+            all_timestamps = []
+            
+            # 各ファイルを処理
+            for idx, uploaded_file in enumerate(uploaded_files):
+                file_name = uploaded_file.name
+                file_size_mb = uploaded_file.size / (1024 * 1024)
+                
+                status_text.text(f"処理中: {file_name} ({idx + 1}/{len(uploaded_files)})")
+                progress_bar.progress((idx + 1) / len(uploaded_files))
+                
                 # 一時ファイルとして保存
-                with tempfile.NamedTemporaryFile(delete=False, suffix=f".{uploaded_file.name.split('.')[-1]}") as tmp_file:
+                with tempfile.NamedTemporaryFile(delete=False, suffix=f".{file_name.split('.')[-1]}") as tmp_file:
                     tmp_file.write(uploaded_file.getvalue())
                     temp_filename = tmp_file.name
                 
                 try:
-                    # モデルロード
-                    load_start = time.time()
-                    progress_text = st.empty()
-                    progress_text.text("モデルをロード中...")
-                    model = load_whisper_model(model_option)
-                    load_end = time.time()
-                    progress_text.text(f"モデルロード完了（{load_end - load_start:.2f}秒）")
-                    
                     # 文字起こし処理
-                    progress_text.text("文字起こし処理中...")
                     transcribe_start = time.time()
                     
                     # 言語オプション設定
                     options = {}
                     if language_option:
                         options["language"] = language_option
-                        
+                    
                     # 文字起こし実行
                     result = model.transcribe(temp_filename, **options)
                     
-                    transcribe_end = time.time()
-                    progress_text.empty()
+                    transcribe_time = time.time() - transcribe_start
                     
-                    # 処理時間計算
-                    transcribe_time = transcribe_end - transcribe_start
-                    total_time = transcribe_end - load_start
+                    # 結果を保存
+                    file_result = {
+                        "filename": file_name,
+                        "text": result["text"],
+                        "transcribe_time": transcribe_time,
+                        "segments": result["segments"]
+                    }
+                    all_results.append(file_result)
                     
-                    # 結果表示
-                    st.markdown("### 文字起こし結果")
-                    st.success(f"処理完了（文字起こし: {transcribe_time:.2f}秒、合計: {total_time:.2f}秒）")
-                    
-                    # テキスト結果表示
-                    st.markdown("#### テキスト")
-                    st.text_area("", value=result["text"], height=200)
-                    
-                    # ダウンロードボタン
-                    st.download_button(
-                        label="テキストをダウンロード",
-                        data=result["text"],
-                        file_name=f"{os.path.splitext(uploaded_file.name)[0]}_transcript.txt",
-                        mime="text/plain"
-                    )
-                    
-                    # タイムスタンプ付きの詳細結果
-                    with st.expander("詳細（タイムスタンプ付き）"):
-                        # テーブル表示用のデータ準備
-                        table_data = []
-                        timestamp_text = ""
+                    # タイムスタンプ付きテキストも保存
+                    timestamp_text = ""
+                    for segment in result["segments"]:
+                        start_time = segment["start"]
+                        end_time = segment["end"]
+                        text = segment["text"]
                         
-                        for segment in result["segments"]:
-                            start_time = segment["start"]
-                            end_time = segment["end"]
-                            text = segment["text"]
-                            
-                            # 時間をフォーマット (HH:MM:SS.ms)
-                            start_formatted = str(datetime.utcfromtimestamp(start_time).strftime('%H:%M:%S.%f'))[:-3]
-                            end_formatted = str(datetime.utcfromtimestamp(end_time).strftime('%H:%M:%S.%f'))[:-3]
-                            
-                            table_data.append({
-                                "開始": start_formatted,
-                                "終了": end_formatted,
-                                "テキスト": text
-                            })
-                            
-                            timestamp_text += f"[{start_formatted} --> {end_formatted}] {text}\n"
+                        start_formatted = str(datetime.utcfromtimestamp(start_time).strftime('%H:%M:%S.%f'))[:-3]
+                        end_formatted = str(datetime.utcfromtimestamp(end_time).strftime('%H:%M:%S.%f'))[:-3]
                         
-                        # テーブル表示
-                        st.table(table_data)
-                        
-                        # タイムスタンプ付きテキストのダウンロードボタン
-                        st.download_button(
-                            label="タイムスタンプ付きテキストをダウンロード",
-                            data=timestamp_text,
-                            file_name=f"{os.path.splitext(uploaded_file.name)[0]}_transcript_timestamps.txt",
-                            mime="text/plain"
-                        )
+                        timestamp_text += f"[{start_formatted} --> {end_formatted}] {text}\n"
+                    
+                    all_timestamps.append({
+                        "filename": file_name,
+                        "timestamp_text": timestamp_text
+                    })
                 
                 except Exception as e:
-                    st.error(f"エラーが発生しました: {str(e)}")
+                    st.error(f"エラーが発生しました ({file_name}): {str(e)}")
                 
                 finally:
                     # 一時ファイルの削除
                     if os.path.exists(temp_filename):
                         os.unlink(temp_filename)
+            
+            # 進捗完了
+            progress_bar.progress(1.0)
+            status_text.text("処理完了！")
+            
+            # 結果の表示
+            st.markdown("### 文字起こし結果")
+            
+            # タブで各ファイルの結果を表示
+            tabs = st.tabs([f"📄 {result['filename']}" for result in all_results])
+            
+            for tab, result in zip(tabs, all_results):
+                with tab:
+                    st.success(f"処理時間: {result['transcribe_time']:.2f}秒")
+                    
+                    # 音声再生
+                    for uploaded_file in uploaded_files:
+                        if uploaded_file.name == result["filename"]:
+                            st.audio(uploaded_file, format=f"audio/{uploaded_file.name.split('.')[-1]}")
+                            break
+                    
+                    # テキスト結果表示
+                    st.text_area(f"{result['filename']} のテキスト", value=result["text"], height=200, key=f"text_{result['filename']}")
+                    
+                    # 個別ダウンロードボタン
+                    st.download_button(
+                        label=f"{result['filename']} をダウンロード",
+                        data=result["text"],
+                        file_name=f"{os.path.splitext(result['filename'])[0]}_transcript.txt",
+                        mime="text/plain",
+                        key=f"download_{result['filename']}"
+                    )
+                    
+                    # タイムスタンプ付きの詳細結果
+                    with st.expander("詳細（タイムスタンプ付き）"):
+                        # タイムスタンプ付きテキストを検索
+                        timestamp_data = next((t for t in all_timestamps if t["filename"] == result["filename"]), None)
+                        if timestamp_data:
+                            st.text_area("タイムスタンプ付きテキスト", 
+                                       value=timestamp_data["timestamp_text"], 
+                                       height=200, 
+                                       key=f"timestamp_{result['filename']}")
+                            
+                            st.download_button(
+                                label="タイムスタンプ付きテキストをダウンロード",
+                                data=timestamp_data["timestamp_text"],
+                                file_name=f"{os.path.splitext(result['filename'])[0]}_transcript_timestamps.txt",
+                                mime="text/plain",
+                                key=f"download_timestamp_{result['filename']}"
+                            )
+            
+            # 全ファイルまとめてダウンロード
+            if len(all_results) > 1:
+                st.markdown("---")
+                st.markdown("### 全ファイルまとめてダウンロード")
+                
+                # 全テキストを結合
+                combined_text = ""
+                combined_timestamp_text = ""
+                
+                for result in all_results:
+                    combined_text += f"=== {result['filename']} ===\n\n"
+                    combined_text += result["text"] + "\n\n"
+                    
+                    timestamp_data = next((t for t in all_timestamps if t["filename"] == result["filename"]), None)
+                    if timestamp_data:
+                        combined_timestamp_text += f"=== {result['filename']} ===\n\n"
+                        combined_timestamp_text += timestamp_data["timestamp_text"] + "\n\n"
+                
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    st.download_button(
+                        label="全テキストをダウンロード",
+                        data=combined_text,
+                        file_name="all_transcripts.txt",
+                        mime="text/plain"
+                    )
+                
+                with col2:
+                    st.download_button(
+                        label="全タイムスタンプ付きテキストをダウンロード",
+                        data=combined_timestamp_text,
+                        file_name="all_transcripts_timestamps.txt",
+                        mime="text/plain"
+                    )
     
     else:
         # ファイルがアップロードされていない場合の表示
@@ -233,9 +300,10 @@ def main():
         with st.expander("使い方"):
             st.markdown("""
             1. サイドバーでモデルサイズと言語を選択
-            2. 音声ファイルをアップロード
+            2. 音声ファイルをアップロード（複数ファイル選択可）
             3. 「文字起こし開始」ボタンをクリック
-            4. 結果を確認し、必要に応じてダウンロード
+            4. 各ファイルの結果を確認し、必要に応じてダウンロード
+            5. 複数ファイルの場合、まとめてダウンロードも可能
             
             **モデルサイズについて:**
             - tiny: 最小・最速（低精度）
@@ -243,6 +311,12 @@ def main():
             - small: 中程度の精度
             - medium: 高精度
             - large: 最高精度（処理時間が長い）
+            
+            **複数ファイルの処理について:**
+            - 同時に複数のファイルを選択できます
+            - 各ファイルは順番に処理されます
+            - 結果はタブで切り替えて確認できます
+            - まとめてダウンロードも可能です
             """)
 
 if __name__ == "__main__":
