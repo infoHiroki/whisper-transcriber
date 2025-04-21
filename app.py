@@ -11,6 +11,7 @@ import whisper
 import torch
 import streamlit as st
 from datetime import datetime
+import subprocess
 
 # ページ設定
 st.set_page_config(
@@ -28,9 +29,42 @@ def load_whisper_model(model_name):
 
 def check_ffmpeg():
     """FFmpegがインストールされているか確認"""
-    if os.system("ffmpeg -version > /dev/null 2>&1") != 0:
-        st.error("⚠️ FFmpegがインストールされていません。https://ffmpeg.org/download.html からダウンロードしてください。")
-        st.stop()
+    try:
+        # まず通常のパスでチェック
+        result = subprocess.run(['ffmpeg', '-version'], 
+                              stdout=subprocess.PIPE, 
+                              stderr=subprocess.PIPE, 
+                              text=True)
+        
+        if result.returncode == 0:
+            st.sidebar.success("✅ FFmpegが検出されました。")
+            return True
+        
+        # 通常のパスで見つからない場合、Chocolateyパスを確認
+        chocolatey_path = r'C:\ProgramData\chocolatey\bin\ffmpeg.exe'
+        if os.path.exists(chocolatey_path):
+            try:
+                result = subprocess.run([chocolatey_path, '-version'],
+                                      stdout=subprocess.PIPE,
+                                      stderr=subprocess.PIPE,
+                                      text=True)
+                if result.returncode == 0:
+                    st.sidebar.success(f"✅ FFmpegが検出されました (Chocolatey: {chocolatey_path})")
+                    # 環境変数を一時的に更新
+                    os.environ['PATH'] = r'C:\ProgramData\chocolatey\bin;' + os.environ['PATH']
+                    return True
+            except Exception:
+                pass
+        
+        st.warning("⚠️ FFmpegが見つかりませんでした。音声ファイルの処理で問題が発生する可能性があります。")
+        st.info("💡 FFmpegがインストールされている場合は、PowerShellまたはコマンドプロンプトを新しく開いて再度実行してください。")
+        # 警告は表示するが、処理は続行
+        return False
+    except Exception as e:
+        st.warning(f"⚠️ FFmpegのチェック中に問題が発生しました: {str(e)}")
+        st.info("💡 FFmpegがインストールされていることを確認し、PATHが正しく設定されているか確認してください。")
+        # エラーの場合も処理は続行
+        return False
 
 def get_available_models():
     """利用可能なWhisperモデルの一覧を返す"""
@@ -43,7 +77,7 @@ def main():
     OpenAIのWhisperモデルを使用して、音声ファイルからテキストへの文字起こしを行います。
     """)
     
-    # FFmpegの確認
+    # FFmpegの確認（エラーで停止しない）
     check_ffmpeg()
     
     # サイドバー設定
