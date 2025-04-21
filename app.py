@@ -12,6 +12,8 @@ import torch
 import streamlit as st
 from datetime import datetime
 import subprocess
+import zipfile
+import io
 
 # ページ設定
 st.set_page_config(
@@ -256,41 +258,83 @@ def main():
                                 key=f"download_timestamp_{result['filename']}"
                             )
             
-            # 全ファイルまとめてダウンロード
+            # 全ファイルまとめてダウンロード（ZIPファイル形式）
             if len(all_results) > 1:
                 st.markdown("---")
                 st.markdown("### 全ファイルまとめてダウンロード")
                 
-                # 全テキストを結合
-                combined_text = ""
-                combined_timestamp_text = ""
+                # ZIP圧縮用の一時メモリバッファ
+                text_zip_buffer = io.BytesIO()
+                timestamp_zip_buffer = io.BytesIO()
                 
-                for result in all_results:
-                    combined_text += f"=== {result['filename']} ===\n\n"
-                    combined_text += result["text"] + "\n\n"
-                    
-                    timestamp_data = next((t for t in all_timestamps if t["filename"] == result["filename"]), None)
-                    if timestamp_data:
-                        combined_timestamp_text += f"=== {result['filename']} ===\n\n"
-                        combined_timestamp_text += timestamp_data["timestamp_text"] + "\n\n"
+                # テキスト用ZIPファイル作成
+                with zipfile.ZipFile(text_zip_buffer, 'w', zipfile.ZIP_DEFLATED) as text_zipf:
+                    for result in all_results:
+                        filename = os.path.splitext(result['filename'])[0]
+                        text_zipf.writestr(f"{filename}_transcript.txt", result["text"])
+                
+                # タイムスタンプ付きテキスト用ZIPファイル作成
+                with zipfile.ZipFile(timestamp_zip_buffer, 'w', zipfile.ZIP_DEFLATED) as timestamp_zipf:
+                    for result in all_results:
+                        filename = os.path.splitext(result['filename'])[0]
+                        timestamp_data = next((t for t in all_timestamps if t["filename"] == result["filename"]), None)
+                        if timestamp_data:
+                            timestamp_zipf.writestr(f"{filename}_transcript_timestamps.txt", timestamp_data["timestamp_text"])
+                
+                # バッファの位置を先頭に戻す
+                text_zip_buffer.seek(0)
+                timestamp_zip_buffer.seek(0)
                 
                 col1, col2 = st.columns(2)
                 
                 with col1:
                     st.download_button(
-                        label="全テキストをダウンロード",
-                        data=combined_text,
-                        file_name="all_transcripts.txt",
-                        mime="text/plain"
+                        label="全テキストをZIPでダウンロード",
+                        data=text_zip_buffer,
+                        file_name="all_transcripts.zip",
+                        mime="application/zip"
                     )
                 
                 with col2:
                     st.download_button(
-                        label="全タイムスタンプ付きテキストをダウンロード",
-                        data=combined_timestamp_text,
-                        file_name="all_transcripts_timestamps.txt",
-                        mime="text/plain"
+                        label="全タイムスタンプ付きテキストをZIPでダウンロード",
+                        data=timestamp_zip_buffer,
+                        file_name="all_transcripts_timestamps.zip",
+                        mime="application/zip"
                     )
+                
+                # 元の単一ファイルダウンロードオプションも残す
+                with st.expander("単一ファイルとしてまとめてダウンロード"):
+                    # 全テキストを結合
+                    combined_text = ""
+                    combined_timestamp_text = ""
+                    
+                    for result in all_results:
+                        combined_text += f"=== {result['filename']} ===\n\n"
+                        combined_text += result["text"] + "\n\n"
+                        
+                        timestamp_data = next((t for t in all_timestamps if t["filename"] == result["filename"]), None)
+                        if timestamp_data:
+                            combined_timestamp_text += f"=== {result['filename']} ===\n\n"
+                            combined_timestamp_text += timestamp_data["timestamp_text"] + "\n\n"
+                    
+                    col3, col4 = st.columns(2)
+                    
+                    with col3:
+                        st.download_button(
+                            label="単一ファイルとして全テキストをダウンロード",
+                            data=combined_text,
+                            file_name="all_transcripts.txt",
+                            mime="text/plain"
+                        )
+                    
+                    with col4:
+                        st.download_button(
+                            label="単一ファイルとして全タイムスタンプ付きテキストをダウンロード",
+                            data=combined_timestamp_text,
+                            file_name="all_transcripts_timestamps.txt",
+                            mime="text/plain"
+                        )
     
     else:
         # ファイルがアップロードされていない場合の表示
@@ -316,7 +360,8 @@ def main():
             - 同時に複数のファイルを選択できます
             - 各ファイルは順番に処理されます
             - 結果はタブで切り替えて確認できます
-            - まとめてダウンロードも可能です
+            - 複数のファイルを個別のテキストファイルとしてZIPでまとめてダウンロードできます
+            - 必要に応じて、すべての結果を単一のテキストファイルとしてもダウンロード可能です
             """)
 
 if __name__ == "__main__":
