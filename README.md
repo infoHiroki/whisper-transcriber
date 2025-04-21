@@ -77,8 +77,11 @@ Webインターフェースでは以下のことができます：
 
 ## ライセンス
 
-MITライセンス
+このプロジェクトは [MITライセンス](LICENSE) の下で公開されています。
+
+このプロジェクトは [fumifumi0831/whisper-transcription](https://github.com/fumifumi0831/whisper-transcription) をベースに拡張・改良されています。元のプロジェクトも MIT ライセンスで提供されています。
 
 ## 謝辞
 
 - [OpenAI Whisper](https://github.com/openai/whisper) - 優れた音声認識モデルの提供に感謝します
+- [Streamlit](https://streamlit.io/) - 簡単に美しいUIを構築できるフレームワーク
